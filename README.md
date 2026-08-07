@@ -4,7 +4,7 @@ A scalable local DevOps laboratory featuring a multi-node Kind Kubernetes cluste
 ## 📁 Project Structure
 
 ```text
-learning/
+/
 ├── kind-cluster-config.yaml    # Multi-node Kind cluster definition (1 CP + 2 Workers)
 ├── docker-compose.yaml         # Portainer CE running via Docker Compose (Local Management)
 ├── portainer-agent.yaml        # Portainer Agent deployed inside Kind (K8s Manifests)
