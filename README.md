@@ -12,6 +12,7 @@ A scalable local DevOps laboratory featuring a multi-node **Kind** Kubernetes cl
 ```
 
 ---
+
 ## 🎯 Learning Objectives
 
 This environment teaches **core Kubernetes concepts** through hands-on practice:
@@ -21,5 +22,46 @@ This environment teaches **core Kubernetes concepts** through hands-on practice:
 3.  **Multi-Node Cluster Architecture**: Simulate production with a 3-node Kind cluster (1 control-plane + 2 workers) for testing distributed workloads and node affinity.
 4.  **Cluster Management & RBAC**: Deploy **Portainer** for visual management, configure ServiceAccounts with ClusterRoleBindings, and understand authorization.
 5.  **Hybrid Development Workflows**: Combine Docker Compose for local tooling with Kubernetes for application workloads.
+
+---
+
+## 🚀 Quick Start
+
+### 1. Create the Kind Cluster
+Creates a 3-node cluster defined in your config file.
+```bash
+kind create cluster --config kind-cluster-config.yaml --name learning-cluster
+```
+
+### 2. Deploy Portainer CE (Docker Compose)
+Starts the Portainer management UI locally.
+```bash
+docker compose up -d
+```
+*Access Portainer UI at `https://localhost:9443`*
+
+### 3. Deploy Portainer Agent to Kind
+Installs the agent inside the cluster to allow Portainer to manage it.
+```bash
+kubectl apply -f portainer-agent.yaml
+```
+
+### 4. Connect Portainer to Kind
+1.  Open Portainer UI (`https://localhost:9443`) and create an admin account.
+2.  Go to **Environments** → **Add Environment** → **Kubernetes** → **Agent**.
+3.  Enter the environment name (e.g., `learning-cluster`).
+4.  **Connection Method**:
+    *   **Option A (LoadBalancer)**: If you have MetalLB installed, use the External IP of `portainer-agent` on port `9001`.
+    *   **Option B (Port Forward - Recommended for Kind)**:
+        ```bash
+        kubectl port-forward svc/portainer-agent -n portainer 9001:9001
+        ```
+        Then connect to `localhost:9001` in the Portainer UI.
+
+### 5. Deploy Sample Application
+Deploys the Nginx app with ConfigMap injection.
+```bash
+kubectl apply -f app-stack.yaml
+```
 
 ---
