@@ -41,9 +41,9 @@ docker compose up -d
 *Access Portainer UI at `https://localhost:9443`*
 
 ### 3. Deploy Portainer Agent to Kind
-Installs the agent inside the cluster to allow Portainer to manage it.
+Installs the agent inside the cluster to allow Portainer to manage it. This will create a portainer namespace inside k8s cluster.
 ```bash
-kubectl apply -f portainer-agent.yaml
+kubectl apply -f portainer-agent-k8s-lb.yaml
 ```
 
 ### 4. Connect Portainer to Kind
