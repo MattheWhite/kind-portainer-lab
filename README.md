@@ -130,3 +130,45 @@ kubectl apply -f app-stack.yaml
 ```
 
 ---
+
+## 📋 Prerequisites
+
+| Tool | Version | Purpose |
+|------|---------|---------|
+| Docker Desktop / Engine | 20.10+ | Container runtime |
+| Kind | 0.20+ | Local Kubernetes cluster |
+| kubectl | 1.28+ | Kubernetes CLI |
+| Docker Compose | 2.0+ | Portainer CE deployment |
+
+**Resource Requirements**: Minimum 8 GB RAM, 4 CPU cores recommended for a smooth multi-node experience.
+
+---
+
+## 📄 File Descriptions
+
+### `kind-cluster-config.yaml`
+Defines the **Kind cluster topology**:
+*   1 control-plane node (API server, scheduler).
+*   2 worker nodes (workload execution).
+*   Enables testing of pod distribution across nodes.
+
+### `docker-compose.yaml`
+Runs **Portainer CE** as a standalone Docker container:
+*   Mounts the Docker socket to manage local containers.
+*   Exposes port `9443` (HTTPS UI) and `8000` (Edge Agents).
+*   Uses a named volume (`portainer_data`) to persist settings.
+
+### `portainer-agent.yaml`
+Deploys the **Portainer Agent** inside the Kubernetes cluster:
+*   Creates a dedicated `portainer` namespace.
+*   Configures **RBAC**: Creates a `ServiceAccount` and binds it to `cluster-admin` (full access).
+*   Exposes the agent via a `LoadBalancer` Service (port 9001) and a headless service for internal comms.
+
+### `app-stack.yaml`
+Demonstrates **application deployment patterns**:
+*   **ConfigMap**: Stores `APP_ENV` and `LOG_LEVEL`.
+*   **Deployment**: Runs 2 replicas of `nginx:alpine` with a **RollingUpdate** strategy.
+*   **Service**: Internal `ClusterIP` service mapping port 8080 to container port 80.
+*   **Injection**: Uses `envFrom` to load all ConfigMap keys as environment variables.
+
+---
