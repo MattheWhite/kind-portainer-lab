@@ -32,27 +32,27 @@ Almost every "why can't I reach it?" problem in this lab comes down to one idea:
 **there are four networks stacked on top of each other, and every boundary needs an explicit crossing mechanism.**
 
 ```text
-┌─ Windows host ──────────────────────────────────────────────────┐
-│  browser → localhost:9443       localhost:8080                  │
-│                  │                    │                         │
-│             [published port]   [port-forward tunnel]            │
-│                  │                    │                         │
-│  ┌─ Docker ──────┼────────────────────┼────────────────────────┐│
-│  │  network: portainer_network   network: kind                 ││
-│  │  ┌──────────────┐            ┌───────────────────────────┐  ││
-│  │  │  portainer   │──joined────│ lab-cluster-control-plane │  ││
-│  │  │  (container) │  (4b)      │ lab-cluster-worker        │  ││
-│  │  └──────────────┘            │ lab-cluster-worker2       │  ││
-│  │                              │   172.18.x.x              │  ││
-│  │       ┌──────────────────────┴──────────────────────┐    │  ││
-│  │       │  Kubernetes                                 │    │  ││
-│  │       │  Services  10.96.x.x    (ClusterIP range)   │    │  ││
-│  │       │  Pods      10.244.x.x   (Pod CIDR)          │    │  ││
-│  │       │  ├─ ns portainer : portainer-agent   :9001  │    │  ││
-│  │       │  └─ ns default   : backend pods      :80    │    │  ││
-│  │       └─────────────────────────────────────────────┘    │  ││
-│  └──────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+┌─ Windows host ─────────────────────────────────────────────────┐
+│  browser → localhost:9443       localhost:8080                 │
+│                  │                    │                        │
+│             [published port]   [port-forward tunnel]           │
+│                  │                    │                        │
+│  ┌─ Docker ──────┼────────────────────┼───────────────────────┐│
+│  │  network: portainer_network   network: kind                ││
+│  │  ┌──────────────┐            ┌──────────────────────────┐  ││
+│  │  │  portainer   │──joined────│ lab-cluster-control-plane│  ││
+│  │  │  (container) │  (4b)      │ lab-cluster-worker       │  ││
+│  │  └──────────────┘            │ lab-cluster-worker2      │  ││
+│  │                              │   172.18.x.x             │  ││
+│  │       ┌──────────────────────┴──────────────────────┐   │  ││
+│  │       │  Kubernetes                                 │   │  ││
+│  │       │  Services  10.96.x.x    (ClusterIP range)   │   │  ││
+│  │       │  Pods      10.244.x.x   (Pod CIDR)          │   │  ││
+│  │       │  ├─ ns portainer : portainer-agent   :9001  │   │  ││
+│  │       │  └─ ns default   : backend pods      :80    │   │  ││
+│  │       └─────────────────────────────────────────────┘   │  ││
+│  └────────────────────────────────────────────────────────────┘│
+└────────────────────────────────────────────────────────────────┘
 ```
 
 | Layer | Address space | How to cross into it |
@@ -79,6 +79,17 @@ Creates a 3-node cluster defined in your config file.
 ```bash
 kind create cluster --config kind-cluster-config.yaml --name lab-cluster
 ```
+
+Verify cluster health before going further. Kind names the kubectl context `kind-<cluster-name>`:
+
+```bash
+kubectl cluster-info --context kind-lab-cluster
+kubectl get nodes                  # 1 control-plane + 2 workers, all Ready
+kubectl get pods -A                # kube-system healthy; CoreDNS Running
+```
+
+All three nodes must reach `Ready` before `kubectl get pods -A` looks sane — the CNI takes a moment to
+initialise. If node creation fails outright, see Troubleshooting (it is almost always Docker resources).
 
 ### 2. Deploy Portainer CE (Docker Compose)
 Starts the Portainer management UI locally.
@@ -301,12 +312,15 @@ with an `Ingress` object pointing at it — which is exactly how real clusters e
 
 ### 7. Exercise the Learning Objectives
 
-**ConfigMap changes do not restart pods.** Edit the ConfigMap, then re-check the pod's environment:
+**ConfigMap changes do not restart pods.** Patch the ConfigMap, then re-check the pod's environment:
 
 ```bash
-kubectl edit configmap app-config          # change LOG_LEVEL to "info"
+kubectl patch configmap app-config -p '{"data":{"LOG_LEVEL":"info"}}'
 kubectl exec deploy/backend-service -- env | grep LOG_LEVEL   # still "debug"!
 ```
+
+*(On PowerShell the inner quotes need escaping — `kubectl edit configmap app-config` is the fuss-free
+alternative.)*
 
 Environment variables are fixed at container start, so the running pods never see the new value. This is the
 single most common ConfigMap gotcha. Force a new generation of pods:
@@ -316,8 +330,17 @@ kubectl rollout restart deploy/backend-service
 kubectl exec deploy/backend-service -- env | grep LOG_LEVEL   # now "info"
 ```
 
-*(Mounting the ConfigMap as a **volume** instead would update the file in-place without a restart — a useful
-follow-up experiment.)*
+#### How a ConfigMap propagates — three modes, three behaviours
+
+| Consumption method | Live update? | Latency | Notes |
+|--------------------|--------------|---------|-------|
+| `envFrom` / `env` (this lab) | ❌ No | never | Frozen at container start; needs `rollout restart` |
+| Volume mount | ✅ Yes | ~1 min | kubelet refreshes the projected file; your app must re-read it |
+| Volume mount with `subPath` | ❌ No | never | Silently never updates — **avoid for dynamic config** |
+
+The `subPath` case is the nastiest of the three, because nothing errors: the file is simply frozen forever.
+Swapping this lab's `envFrom` for a volume mount is a worthwhile follow-up experiment — note that auto-updating
+the *file* still doesn't help unless the application watches it and reloads.
 
 **Watch the zero-downtime rollout.** In one terminal:
 
@@ -332,9 +355,29 @@ kubectl rollout restart deploy/backend-service
 kubectl rollout status deploy/backend-service
 ```
 
-With `maxSurge: 1` and `maxUnavailable: 0`, Kubernetes creates one *extra* pod and waits for it to become Ready
-**before** terminating an old one — the replica count never drops below 2. Change `maxUnavailable` to `1` and
-repeat to see the difference.
+With `maxSurge: 1` and `maxUnavailable: 0`, Kubernetes creates one *extra* pod (3 pods exist transiently) and
+waits for it to become Ready **before** terminating an old one — the count of available pods never drops below 2.
+Change `maxUnavailable` to `1` and repeat to see the difference.
+
+> **⚠️ Caveat worth internalising:** this strategy guarantees the *replica count*, not that requests actually
+> succeed. Kubernetes marks a pod Ready as soon as its container starts, because `app-stack.yaml` defines **no
+> `readinessProbe`**. A real app that needs 10 seconds to warm up would receive traffic immediately and drop it.
+> Adding a `readinessProbe` is what turns "zero replicas unavailable" into genuine zero-downtime — and is the
+> single most valuable addition you could make to this manifest.
+
+**Scale the deployment.** Watch how the scheduler distributes pods:
+
+```bash
+kubectl scale deployment backend-service --replicas=5
+kubectl get pods -l app=backend -o wide       # NODE column shows the spread
+kubectl scale deployment backend-service --replicas=2
+```
+
+Two things to notice. First, with no `resources.requests` declared, the scheduler has little information to
+balance on, so spread is roughly even but not guaranteed — declaring CPU/memory requests is what makes placement
+predictable. Second, `kubectl scale` is **imperative**: the next `kubectl apply -f app-stack.yaml` resets you to
+`replicas: 2`, because the file is the declared source of truth. That tension between imperative commands and
+declarative manifests is exactly the problem GitOps tools solve.
 
 **Inspect the object hierarchy.** A Deployment does not create pods directly:
 
@@ -430,6 +473,9 @@ Demonstrates **application deployment patterns**:
 | `port-forward` works locally but not from a container | Default bind is `127.0.0.1` | Add `--address 0.0.0.0` and use `host.docker.internal` |
 | ConfigMap edited but pod env unchanged | Env vars are frozen at container start | `kubectl rollout restart deploy/backend-service` |
 | Environment vanished after recreating the cluster | New cluster = new NodePort and new certs | Re-run step 3, re-register with the new NodePort |
+| `ERROR: failed to create cluster: unable to prepare nodes` | Insufficient Docker resources | Raise Docker Desktop to ≥ 8 GB RAM / 4 CPUs, then `kind delete cluster` and retry |
+| Nodes stuck `NotReady` right after creation | CNI still initialising | Wait ~30 s; if it persists, check `kubectl -n kube-system get pods` for CrashLoopBackOff |
+| `kubectl` targets the wrong cluster | Multiple Kind clusters share one kubeconfig | `kubectl config use-context kind-lab-cluster` |
 
 ### Teardown
 
@@ -438,6 +484,61 @@ kubectl delete -f app-stack.yaml
 kubectl delete -f portainer-agent-k8s-lb.yaml
 kind delete cluster --name lab-cluster
 docker compose down            # add -v to also drop the portainer_data volume
+```
+
+---
+
+## 🎓 Next Steps
+
+Once this setup feels routine, the natural progression — roughly in order of difficulty:
+
+*   **`readinessProbe` / `livenessProbe`**: add them to `app-stack.yaml` and re-run the rollout experiment.
+    This is the missing piece that makes the zero-downtime claim real (see step 7).
+*   **Resource requests & limits**: declare CPU/memory so the scheduler can place pods deliberately, and watch
+    what happens when you request more than the cluster has.
+*   **Ingress**: promote step 6c from an option to the default way in, then route two apps by path.
+*   **Persistent Storage**: create a `PersistentVolumeClaim` and mount it — Kind ships a default
+    `standard` StorageClass backed by host paths.
+*   **ConfigMap as a volume**: swap `envFrom` for a mounted volume and observe the ~1 minute live update.
+*   **Network Policies**: restrict traffic between `default` and `portainer`. Note that Kind's default CNI
+    (kindnet) does **not** enforce NetworkPolicy — you must recreate the cluster with `disableDefaultCNI: true`
+    and install Calico or Cilium, which is a genuinely instructive exercise in itself.
+*   **Least-privilege RBAC**: replace the agent's `cluster-admin` binding with a custom `ClusterRole` listing
+    only the verbs Portainer actually needs, and find the breakages.
+*   **GitOps**: install **ArgoCD** and let it reconcile these manifests from the Git repo — which permanently
+    resolves the imperative-vs-declarative drift you saw with `kubectl scale`.
+
+---
+
+## 📖 References
+
+*   [Kind Documentation](https://kind.sigs.k8s.io/) — see *Configuration* for `extraPortMappings`, and *Ingress* for the 6c recipe
+*   [Kind: LoadBalancer / cloud-provider-kind](https://kind.sigs.k8s.io/docs/user/loadbalancer/)
+*   [Portainer Kubernetes Agent Guide](https://docs.portainer.io/)
+*   [Kubernetes ConfigMap Docs](https://kubernetes.io/docs/concepts/configuration/configmap/)
+*   [Deployments & Rolling Update Strategies](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+*   [Service Types (ClusterIP / NodePort / LoadBalancer)](https://kubernetes.io/docs/concepts/services-networking/service/)
+*   [RBAC: ServiceAccounts & ClusterRoleBindings](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
+*   [Configure Liveness, Readiness and Startup Probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
+
+---
+
+## 🗂️ Environment Details
+
+| Item | Value |
+|------|-------|
+| Created | August 2026 |
+| Kind cluster name | `lab-cluster` (kubectl context `kind-lab-cluster`) |
+| Kubernetes version | whatever your Kind release pins — check with `kubectl version` |
+| Portainer Agent | `2.42.0` (pinned in `portainer-agent-k8s-lb.yaml`) |
+| Portainer CE | `portainer/portainer-ce:sts` (floating tag — pin it if you want reproducibility) |
+
+Verify the actual versions in play rather than trusting this table:
+
+```bash
+kind version
+kubectl version
+kubectl get nodes -o wide          # KERNEL / CONTAINER-RUNTIME / node K8s version
 ```
 
 ---
