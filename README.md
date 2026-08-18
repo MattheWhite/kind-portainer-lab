@@ -32,27 +32,27 @@ Almost every "why can't I reach it?" problem in this lab comes down to one idea:
 **there are four networks stacked on top of each other, and every boundary needs an explicit crossing mechanism.**
 
 ```text
-┌─ Windows host ─────────────────────────────────────────────────┐
-│  browser → localhost:9443       localhost:8080                 │
-│                  │                    │                        │
-│             [published port]   [port-forward tunnel]           │
-│                  │                    │                        │
-│  ┌─ Docker ──────┼────────────────────┼───────────────────────┐│
-│  │  network: portainer_network   network: kind                ││
-│  │  ┌──────────────┐            ┌──────────────────────────┐  ││
-│  │  │  portainer   │──joined────│ lab-cluster-control-plane│  ││
-│  │  │  (container) │  (4b)      │ lab-cluster-worker       │  ││
-│  │  └──────────────┘            │ lab-cluster-worker2      │  ││
-│  │                              │   172.18.x.x             │  ││
+┌─ Windows host ──────────────────────────────────────────────────┐
+│  browser → localhost:9443       localhost:8080                  │
+│                  │                    │                         │
+│             [published port]   [port-forward tunnel]            │
+│                  │                    │                         │
+│  ┌─ Docker ──────┼────────────────────┼────────────────────────┐│
+│  │  network: portainer_network   network: kind                 ││
+│  │  ┌──────────────┐            ┌───────────────────────────┐  ││
+│  │  │  portainer   │──joined────│ lab-cluster-control-plane │  ││
+│  │  │  (container) │  (4b)      │ lab-cluster-worker        │  ││
+│  │  └──────────────┘            │ lab-cluster-worker2       │  ││
+│  │                              │   172.18.x.x              │  ││
 │  │       ┌──────────────────────┴──────────────────────┐    │  ││
 │  │       │  Kubernetes                                 │    │  ││
 │  │       │  Services  10.96.x.x    (ClusterIP range)   │    │  ││
 │  │       │  Pods      10.244.x.x   (Pod CIDR)          │    │  ││
-│  │       │  ├─ ns portainer : portainer-agent   :9001   │   │  ││
-│  │       │  └─ ns default   : backend pods      :80     │   │  ││
+│  │       │  ├─ ns portainer : portainer-agent   :9001  │    │  ││
+│  │       │  └─ ns default   : backend pods      :80    │    │  ││
 │  │       └─────────────────────────────────────────────┘    │  ││
-│  └────────────────────────────────────────────────────────────┘│
-└────────────────────────────────────────────────────────────────┘
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 | Layer | Address space | How to cross into it |
